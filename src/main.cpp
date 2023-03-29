@@ -170,11 +170,10 @@ void mountSdStruct() {
     uint16_t fileCounter;
   };
 
-  File root = SD.open((const char*)"/");
+  File root = SD.open("/");
   File file = root.openNextFile();
 
-  uint8_t deep = 0;
-  int folderCounter = 1;
+  uint16_t folderCounter = 1;
   struct Folder *_folders = (struct Folder*)malloc(sizeof(struct Folder*));
   _folders[0].name = (char*)malloc(sizeof(char*) * 2);
   _folders[0].name[0] = '/';
@@ -191,18 +190,52 @@ void mountSdStruct() {
         folderCounter++;
         _folders = (struct Folder*)realloc(_folders, sizeof (struct Folder*));
         _folders[folderCounter - 1].name = (char*)malloc(sizeof (char*) * (nameSize + 1));
-        strcpy(_folders[folderCounter - 1].name, fileName);
+        strcpy(_folders[folderCounter - 1].name, "/");
+        strcat(_folders[folderCounter - 1].name, fileName);
       }
     }
     file = root.openNextFile();
   }
 
-  Serial.printf("Folder name 0: %s\n-----\n", _folders[0].name);
-  Serial.printf("Folder name 1: %s\n-----\n", _folders[1].name);
-  Serial.printf("Folder name 2: %s\n-----\n", _folders[2].name);
+  for(uint16_t folder = 0; folder < folderCounter; folder++) {
+    File root = SD.open(_folders[folder].name);
+    File file = root.openNextFile();
+    uint16_t fileCounter = 0;
+    _folders[folder].files = (char**)malloc(sizeof(char**));
+    for(int j = 0; file; j++) {
+      String name = file.name();
+      if(!file.isDirectory() && !name.startsWith(".")) {
+        setFileExtension((char*)file.name());
+        uint8_t mp3 = strcmp(extension, "mp3");
+        uint8_t wav = strcmp(extension, "wav");
+        if(mp3 == 0 || wav == 0) {
+          fileCounter++;
+          _folders[folder].files = (char**)realloc(_folders[folder].files, sizeof(char**) * fileCounter);
+          if(folder == 0) {
+            _folders[folder].files[fileCounter - 1] = (char*)malloc(sizeof(char*) * (name.length()));
+            strcpy(_folders[folder].files[fileCounter - 1], file.name());
+          }
+          else {
+            _folders[folder].files[fileCounter - 1] = (char*)malloc(sizeof(char*) * (name.length() + 1));
+            strcpy(_folders[folder].files[fileCounter - 1], "/");
+            strcat(_folders[folder].files[fileCounter - 1], file.name());
+          }
+        }
+      }
+      _folders[folder].fileCounter = fileCounter;
+      file = root.openNextFile();
+    }
+  }
+
+  for(int i = 0; i < folderCounter; i++) {
+    struct Folder f = _folders[i];
+    Serial.printf("*Folder: %s, File_Count %d\n", f.name, f.fileCounter);
+    for(int j = 0; j < f.fileCounter; j++) {
+      Serial.printf("\t*File: %s%s\n", f.name, f.files[j]);
+    }
+  }
 }
 
-int16_t xPosName = -SCREEN_WIDTH;
 void loop() {
   checkPins();
   updateDisplay();
@@ -431,6 +464,7 @@ void getFileExtension(char *buf, char *file) {
 uint32_t g_DisplayTime = millis();
 uint32_t g_SerialTime = millis();
 uint8_t y_offset = 0;
+int16_t xPosName = -SCREEN_WIDTH;
 
 void updateDisplay(void) {
   uint32_t crr_DisplayTime = millis();
