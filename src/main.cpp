@@ -118,7 +118,7 @@ char *currentFile = NULL;
 char *filePath = NULL;
 char *extension = (char*)malloc(sizeof (char*) * 4);
 bool pauseResumeStatus = 0;
-uint8_t volume = 5;
+uint8_t volume = 1;
 
 int setUpSSD1306Display(void);
 int setUpSdCard(void);
@@ -137,6 +137,7 @@ void playResume() { button_event = PLAY_PAUSE_SONG_EVENT; audio.pauseResume(); p
 void previusSong() { button_event = PREVIUS_SONG_EVENT; loadSD(fileIndex - 1, folderIndex); }
 void previusFolder() { button_event = PREVIUS_FOLDER_EVENT; loadSD(FILE_ROOT, folderIndex - 1); }
 void lastSong() { button_event = LAST_SONG_EVENT; loadSD(FILE_ROOT, folderCounter - 1); }
+void mountSdStruct(void);
 
 void setup() {
   Serial.begin(9600);
@@ -152,13 +153,56 @@ void setup() {
   if(!setUpSSD1306Display()) return;
   if(!setUpSdCard()) return;
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
-  audio.setVolume(5); // default 0...21
+  audio.setVolume(volume); // default 0...21
   
   loadSD(FILE_ROOT, SD_ROOT);
+  mountSdStruct();
+}
+
+
+
+void mountSdStruct() {
+  Serial.println("\nMONTANDO A ESTRUTURA DO CARTÃO SD;\n");
+
+  struct Folder {
+    char* name;
+    char** files;
+    uint16_t fileCounter;
+  };
+
+  File root = SD.open((const char*)"/");
+  File file = root.openNextFile();
+
+  uint8_t deep = 0;
+  int folderCounter = 1;
+  struct Folder *_folders = (struct Folder*)malloc(sizeof(struct Folder*));
+  _folders[0].name = (char*)malloc(sizeof(char*) * 2);
+  _folders[0].name[0] = '/';
+  _folders[0].name[1] = '\0';
+
+  for (int i = 0; file; i++) {
+    char fileName[maxFileNameSize];
+    strncpy(fileName, file.name(), maxFileNameSize);
+    String _n = file.name();
+    int nameSize = _n.length();
+
+    if(!_n.startsWith(".")) {
+      if(file.isDirectory()) {
+        folderCounter++;
+        _folders = (struct Folder*)realloc(_folders, sizeof (struct Folder*));
+        _folders[folderCounter - 1].name = (char*)malloc(sizeof (char*) * (nameSize + 1));
+        strcpy(_folders[folderCounter - 1].name, fileName);
+      }
+    }
+    file = root.openNextFile();
+  }
+
+  Serial.printf("Folder name 0: %s\n-----\n", _folders[0].name);
+  Serial.printf("Folder name 1: %s\n-----\n", _folders[1].name);
+  Serial.printf("Folder name 2: %s\n-----\n", _folders[2].name);
 }
 
 int16_t xPosName = -SCREEN_WIDTH;
-
 void loop() {
   checkPins();
   updateDisplay();
@@ -363,6 +407,7 @@ void loadSD(uint16_t _fileIndex, int32_t _folderIndex) {
 }
 
 void setFileExtension(char *fileName) {
+  // Remover do programa #1
   uint8_t count = 0;
   bool e = 0;
   for(uint8_t i = 0; i < strlen(fileName); i++) {
@@ -370,6 +415,17 @@ void setFileExtension(char *fileName) {
     else if(fileName[i] == '.') e = 1;
   }
   extension[3] = '\0';
+}
+
+void getFileExtension(char *buf, char *file) {
+  uint8_t count = 0;
+  bool e = 0;
+  buf = (char*)malloc(sizeof(char*) + 1);
+  for(uint8_t i = 0; i < strlen(file); i++) {
+    if(e == 1) buf[count++] = file[i];
+    else if(file[i] == '.') e = 1;
+  }
+  buf[3] = '\0';
 }
 
 uint32_t g_DisplayTime = millis();
@@ -531,6 +587,7 @@ void checkPins() {
     
     if(forwardPin && !forwardPinPressed) {
       Serial.println("forwardPin");
+      forwardPinPressed = 1;
       if(fileCounter > fileIndex + 1) nextSong();
       else if(folderCounter > folderIndex) nextFolder();
       else rootSong();
@@ -539,12 +596,14 @@ void checkPins() {
 
     if(playPin && !playPinPressed) {
       Serial.println("playPin");
+      playPinPressed = 1;
       playResume();
     }
     else if (!playPin && playPinPressed) playPinPressed = 0;
 
     if(backwardPin && !backwardPinPressed) {
       Serial.println("backwardPin");
+      backwardPinPressed = 1;
       if(fileIndex > FILE_ROOT) previusSong();
       else if (folderIndex > SD_ROOT) previusFolder();
       else lastSong();
@@ -552,15 +611,15 @@ void checkPins() {
     else if (!backwardPin && backwardPinPressed) backwardPinPressed = 0;
     
     if(volumeUpPin && volume < 21) {
-      button_event = VOLUME_UP_EVENT;
       Serial.println("Volume up");
+      button_event = VOLUME_UP_EVENT;
       volume++;
       audio.setVolume(volume);
     }
 
     if(volumeDownPin && volume > 0) {
-      button_event = VOLUME_DOWN_EVENT;
       Serial.println("Volume down");
+      button_event = VOLUME_DOWN_EVENT;
       volume--;
       audio.setVolume(volume);
     }
