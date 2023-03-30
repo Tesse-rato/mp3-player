@@ -207,16 +207,12 @@ void mountSdStruct() {
       String name = file.name();
       if(!file.isDirectory() && !name.startsWith(".")) {
         setFileExtension((char*)file.name());
-        uint8_t mp3 = strcmp(extension, "mp3");
-        uint8_t wav = strcmp(extension, "wav");
-        uint8_t aac = strcmp(extension, "aac");
-        uint8_t m4a = strcmp(extension, "m4a");
 
         if(
-          mp3 == 0 ||
-          wav == 0 ||
-          aac == 0 ||
-          m4a == 0
+          strcmp(extension, "mp3") == 0 ||
+          strcmp(extension, "wav") == 0 ||
+          strcmp(extension, "aac") == 0 ||
+          strcmp(extension, "m4a") == 0
         ) {
           fc++;
           folders[folder].files = (char**)realloc(folders[folder].files, sizeof(char**) * fc);
