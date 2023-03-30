@@ -67,7 +67,7 @@ const unsigned char* bmp_allArray[8] = {
 #define I2S_BCLK      27
 #define I2S_LRC       26
 
-#define SD_ROOT -1
+#define SD_ROOT 0
 #define FILE_ROOT 0
 #define maxFileNameSize 128
 
@@ -106,24 +106,23 @@ uint8_t button_event = NO_BTN_EVENT;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Audio audio;
 
-char **folders = NULL;
+struct Folder {
+  char* name;
+  char** files;
+  uint16_t fileCounter = 0;
+};
+struct Folder *folders;
 uint16_t folderCounter = 0;
+
 int16_t folderIndex = SD_ROOT;
-char **files = NULL;
-uint16_t fileCounter = 0;
 uint16_t fileIndex = 0;
 
-char *currentFolder = NULL;
-char *currentFile = NULL;
-char *filePath = NULL;
-char *extension = (char*)malloc(sizeof (char*) * 4);
+char *extension = (char*)malloc(sizeof (char*) * 4); // REMOVER DO PROGRAMA
 bool pauseResumeStatus = 0;
-uint8_t volume = 1;
+uint8_t volume = 10;
 
 int setUpSSD1306Display(void);
 int setUpSdCard(void);
-void readSdFolders(const char *path);
-void readSdFiles(const char *path);
 void setFileExtension(char*);
 void updateDisplay(void);
 void formatSeconds(char *timeBuffer, uint32_t seconds);
@@ -132,7 +131,7 @@ void loadSD(uint16_t _fileIndex, int32_t _folderIndex);
 void watchTrackPlaying(void);
 void nextSong() { button_event = NEXT_SONG_EVENT; loadSD(fileIndex + 1, folderIndex); }
 void nextFolder() { button_event = NEXT_FOLDER_EVENT; loadSD(FILE_ROOT, folderIndex + 1); }
-void rootSong() { button_event = ROOT_SONG_EVENT; loadSD(FILE_ROOT, SD_ROOT); }
+void rootSong() { button_event = ROOT_SONG_EVENT; loadSD(FILE_ROOT, SD_ROOT);}
 void playResume() { button_event = PLAY_PAUSE_SONG_EVENT; audio.pauseResume(); pauseResumeStatus = !pauseResumeStatus; }
 void previusSong() { button_event = PREVIUS_SONG_EVENT; loadSD(fileIndex - 1, folderIndex); }
 void previusFolder() { button_event = PREVIUS_FOLDER_EVENT; loadSD(FILE_ROOT, folderIndex - 1); }
@@ -155,85 +154,8 @@ void setup() {
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
   audio.setVolume(volume); // default 0...21
   
-  loadSD(FILE_ROOT, SD_ROOT);
   mountSdStruct();
-}
-
-
-
-void mountSdStruct() {
-  Serial.println("\nMONTANDO A ESTRUTURA DO CARTÃO SD;\n");
-
-  struct Folder {
-    char* name;
-    char** files;
-    uint16_t fileCounter;
-  };
-
-  File root = SD.open("/");
-  File file = root.openNextFile();
-
-  uint16_t folderCounter = 1;
-  struct Folder *_folders = (struct Folder*)malloc(sizeof(struct Folder*));
-  _folders[0].name = (char*)malloc(sizeof(char*) * 2);
-  _folders[0].name[0] = '/';
-  _folders[0].name[1] = '\0';
-
-  for (int i = 0; file; i++) {
-    char fileName[maxFileNameSize];
-    strncpy(fileName, file.name(), maxFileNameSize);
-    String _n = file.name();
-    int nameSize = _n.length();
-
-    if(!_n.startsWith(".")) {
-      if(file.isDirectory()) {
-        folderCounter++;
-        _folders = (struct Folder*)realloc(_folders, sizeof (struct Folder*));
-        _folders[folderCounter - 1].name = (char*)malloc(sizeof (char*) * (nameSize + 1));
-        strcpy(_folders[folderCounter - 1].name, "/");
-        strcat(_folders[folderCounter - 1].name, fileName);
-      }
-    }
-    file = root.openNextFile();
-  }
-
-  for(uint16_t folder = 0; folder < folderCounter; folder++) {
-    File root = SD.open(_folders[folder].name);
-    File file = root.openNextFile();
-    uint16_t fileCounter = 0;
-    _folders[folder].files = (char**)malloc(sizeof(char**));
-    for(int j = 0; file; j++) {
-      String name = file.name();
-      if(!file.isDirectory() && !name.startsWith(".")) {
-        setFileExtension((char*)file.name());
-        uint8_t mp3 = strcmp(extension, "mp3");
-        uint8_t wav = strcmp(extension, "wav");
-        if(mp3 == 0 || wav == 0) {
-          fileCounter++;
-          _folders[folder].files = (char**)realloc(_folders[folder].files, sizeof(char**) * fileCounter);
-          if(folder == 0) {
-            _folders[folder].files[fileCounter - 1] = (char*)malloc(sizeof(char*) * (name.length()));
-            strcpy(_folders[folder].files[fileCounter - 1], file.name());
-          }
-          else {
-            _folders[folder].files[fileCounter - 1] = (char*)malloc(sizeof(char*) * (name.length() + 1));
-            strcpy(_folders[folder].files[fileCounter - 1], "/");
-            strcat(_folders[folder].files[fileCounter - 1], file.name());
-          }
-        }
-      }
-      _folders[folder].fileCounter = fileCounter;
-      file = root.openNextFile();
-    }
-  }
-
-  for(int i = 0; i < folderCounter; i++) {
-    struct Folder f = _folders[i];
-    Serial.printf("*Folder: %s, File_Count %d\n", f.name, f.fileCounter);
-    for(int j = 0; j < f.fileCounter; j++) {
-      Serial.printf("\t*File: %s%s\n", f.name, f.files[j]);
-    }
-  }
+  loadSD(0, 0);
 }
 
 void loop() {
@@ -241,6 +163,78 @@ void loop() {
   updateDisplay();
   watchTrackPlaying();
   audio.loop();
+}
+
+void mountSdStruct() {
+  File root = SD.open("/");
+  File file = root.openNextFile();
+
+  char **foldersArray = (char **)malloc(sizeof(char **));
+  folderCounter = 1;
+  foldersArray[0] = (char*)malloc(sizeof(char*) * 2);
+  strcpy(foldersArray[0], "/");
+
+  for(uint16_t i = 0; file; i++) {
+    String name = file.name();
+    if(file.isDirectory() && !name.startsWith(".")) {
+      foldersArray = (char**)realloc(foldersArray, sizeof(char**) * ++folderCounter);
+      foldersArray[folderCounter - 1] = (char*)malloc(sizeof(char*) * (name.length() + 1));
+      strcpy(foldersArray[folderCounter - 1], file.name());
+    }
+    file = root.openNextFile();
+  }
+
+  free(folders);
+  folders = (struct Folder*)malloc(sizeof(struct Folder*) * (folderCounter + 1));
+
+  for(uint16_t i = 0; i < folderCounter; i++) {
+    folders[i].name = (char*)malloc(sizeof(char*) * (strlen(foldersArray[i]) + 1));
+    strcpy(folders[i].name, "");
+    if(i > 0) strcat(folders[i].name, "/");
+    strcat(folders[i].name, foldersArray[i]);
+  }
+
+  free(foldersArray);
+  foldersArray = NULL;
+
+  for(uint16_t folder = 0; folder < folderCounter; folder++) {
+    File root = SD.open(folders[folder].name);
+    File file = root.openNextFile();
+    folders[folder].files = (char**)malloc(sizeof(char**));
+    folders[folder].fileCounter = 0;
+    uint16_t fc = 0;
+    for(int j = 0; file; j++) {
+      String name = file.name();
+      if(!file.isDirectory() && !name.startsWith(".")) {
+        setFileExtension((char*)file.name());
+        uint8_t mp3 = strcmp(extension, "mp3");
+        uint8_t wav = strcmp(extension, "wav");
+        uint8_t aac = strcmp(extension, "aac");
+        uint8_t m4a = strcmp(extension, "m4a");
+
+        if(
+          mp3 == 0 ||
+          wav == 0 ||
+          aac == 0 ||
+          m4a == 0
+        ) {
+          fc++;
+          folders[folder].files = (char**)realloc(folders[folder].files, sizeof(char**) * fc);
+          if(folder == 0) {
+            folders[folder].files[fc - 1] = (char*)malloc(sizeof(char*) * (name.length()));
+            strcpy(folders[folder].files[fc - 1], file.name());
+          }
+          else {
+            folders[folder].files[fc - 1] = (char*)malloc(sizeof(char*) * (name.length() + 1));
+            strcpy(folders[folder].files[fc - 1], "/");
+            strcat(folders[folder].files[fc - 1], file.name());
+          }
+        }
+      }
+      file = root.openNextFile();
+    }
+    folders[folder].fileCounter = fc;
+  }
 }
 
 int setUpSSD1306Display() {
@@ -307,135 +301,41 @@ int setUpSdCard() {
   return 1;
 }
 
-void readSdFolders(const char *path) {
-  File root = SD.open(path);
-  File file = root.openNextFile();
-  folderCounter = 0;
-
-  for (int i = 0; file; i++) {
-    char fileName[maxFileNameSize];
-    strncpy(fileName, file.name(), maxFileNameSize);
-    String _n = file.name();
-    int nameSize = _n.length();
-
-    if(!_n.startsWith(".")) {
-      if(file.isDirectory()) {
-        folders = (char**)realloc(folders, sizeof (char**) * (++folderCounter));
-        folders[folderCounter - 1] = (char*)malloc(sizeof(char*) * nameSize + 1);
-        strcpy(folders[folderCounter - 1], fileName);
-      }
-    }
-    file = root.openNextFile();
-  }
-}
-
-void readSdFiles(const char *path) {
-  File root = SD.open(path);
-  File file = root.openNextFile();
-  fileCounter = 0;
-
-  for (int i = 0; file; i++) {
-    char fileName[maxFileNameSize] = "";
-    strncpy(fileName, file.name(), maxFileNameSize);
-    String _n = file.name();
-    int nameSize = _n.length();
-
-    if(
-      !_n.startsWith(".") && 
-      !file.isDirectory()
-    ) {
-      setFileExtension(fileName);
-      uint8_t isMp3 = strcmp(extension, "mp3");
-      uint8_t isWav = strcmp(extension, "wav");
-      if(isMp3 == 0 || isWav == 0) {
-        fileCounter++;
-        files = (char**)realloc(files, sizeof (char**) * (fileCounter));
-        files[fileCounter - 1] = (char*)malloc(sizeof(char*) * nameSize + 1);
-        strcpy(files[fileCounter - 1], fileName);
-      }
-    }
-
-    file = root.openNextFile();
-  }
-}
-
-/**
- * @arg _fileIndex // 0 ... MAX_uint16_t
- * @arg _folderIndex // -1 ... MAX_int16_t, Valor -1 significa a raiz da pasta
-*/
 void loadSD(uint16_t _fileIndex, int32_t _folderIndex) {
-  
-  if(_fileIndex < 0) return loadSD(0, _folderIndex);
-  if(_folderIndex < -1) return loadSD(_fileIndex, -1);
+  if(_fileIndex < FILE_ROOT) return loadSD(FILE_ROOT, _folderIndex);
+  if(_folderIndex < SD_ROOT) return loadSD(_fileIndex, SD_ROOT);
   digitalWrite(AMP_REM_PIN, LOW);
-
   folderIndex = _folderIndex;
   fileIndex = _fileIndex;
 
-  free(currentFolder);
-  currentFolder = NULL;
-  currentFolder = (char*)malloc(sizeof (char*) + 1);
-  strcpy(currentFolder, "/");
+  struct Folder folder = folders[folderIndex];
 
-  readSdFolders(currentFolder);
+  if(!folder.fileCounter && button_event == PREVIUS_FOLDER_EVENT) {
+    return loadSD(fileIndex, folderIndex - 1);
+    button_event = NO_BTN_EVENT;
+  }
+  if(!folder.fileCounter && button_event == LAST_SONG_EVENT) {
+    return loadSD(fileIndex, folderIndex - 1);
+    button_event = NO_BTN_EVENT;
+  }
+  if(!folder.fileCounter) return loadSD(fileIndex, folderIndex + 1);
 
-  if(folderIndex > SD_ROOT && folderCounter > 0) {
-    free(currentFolder);
-    currentFolder = NULL;
-    currentFolder = (char*)malloc(sizeof (char*) * strlen(folders[folderIndex]) + 2);
-    strcpy(currentFolder, "/");
-    strcat(currentFolder, folders[folderIndex]);
-    readSdFolders(currentFolder);
+  if(button_event == LAST_SONG_EVENT) {
+    button_event = NO_BTN_EVENT;
+    return loadSD(folders[folderIndex].fileCounter - 1, folderIndex);
   }
 
-  readSdFiles(currentFolder);
-  
-  if(!fileCounter && button_event == PREVIUS_FOLDER_EVENT) return loadSD(_fileIndex, _folderIndex - 1);
-  if(!fileCounter && button_event == LAST_SONG_EVENT) return loadSD(_fileIndex, _folderIndex - 1);
-  else if(!fileCounter) return loadSD(_fileIndex, _folderIndex + 1);
- 
-  free(currentFile);
-  currentFile = NULL;
-  free(filePath);
-  filePath = NULL;
+  char* file = folder.files[fileIndex];
+  char* path = (char*)malloc(sizeof (char*) * (strlen(folder.name) + strlen(file)));
+  strcpy(path, folder.name);
+  strcat(path, file);
 
-  currentFile = (char*)malloc(sizeof(char*) * strlen(files[fileIndex]));
-  if(button_event == PREVIUS_FOLDER_EVENT) currentFile = files[fileIndex = fileCounter - 1];
-  else if(button_event == LAST_SONG_EVENT) currentFile = files[fileIndex = fileCounter - 1];
-  else currentFile = files[fileIndex];
-  filePath = (char*)malloc(sizeof(char*) * (strlen(currentFile) + strlen(currentFolder) + 2));
-  
-  Serial.printf("Load SD\n\t_fileIndex: %d\n\t_folderIndex: %d\n\tbutton_event: %d\n\tcurrentFile: %s\n\tcurrentFolder: %s\n\n", _fileIndex, _folderIndex, button_event, currentFile, currentFolder);
+  audio.connecttoFS(SD, (const char*)path);
+  digitalWrite(AMP_REM_PIN, HIGH);
+  pauseResumeStatus = 1;
 
-  if(folderIndex > SD_ROOT) {
-    // Se folderIndex for maior que SD_ROOT
-    // quer dizer que o usuário abriu alguma pasta do SD
-    // então é concatenado as barras no inincio e após o nome da pasta
-    strcpy(filePath, currentFolder);
-    strcat(filePath, "/");
-    strcat(filePath, currentFile);
-  }
-  else {
-    // Se o index das pastas for igual a raiz do SD
-    // apenas concatena uma barra ao inicio do nome do arquivo
-    strcpy(filePath, "/");
-    strcat(filePath, currentFile);
-  }
-
-  if(!filePath || strlen(filePath) < 1) {
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println("Nao foi possivel");
-    display.println("encontrar uma faixa");
-    display.println("de música");
-    display.display();
-    for(;;);
-  }
-  else {
-    audio.connecttoFS(SD, filePath);
-    digitalWrite(AMP_REM_PIN, HIGH);
-    pauseResumeStatus = 1;
-  }
+  free(path);
+  path = NULL;
   button_event = NO_BTN_EVENT;
 }
 
@@ -465,7 +365,6 @@ uint32_t g_DisplayTime = millis();
 uint32_t g_SerialTime = millis();
 uint8_t y_offset = 0;
 int16_t xPosName = -SCREEN_WIDTH;
-
 void updateDisplay(void) {
   uint32_t crr_DisplayTime = millis();
   uint32_t crr_SerialTime = millis();
@@ -474,7 +373,7 @@ void updateDisplay(void) {
   if((crr_DisplayTime - g_DisplayTime) > 250) {
     g_DisplayTime = crr_DisplayTime;
 
-    uint16_t fileSize = strlen(currentFile);
+    uint16_t fileSize = strlen(folders[folderIndex].files[fileIndex]);
     uint16_t maxXPosName = (letterWidth * fileSize);
     uint16_t audioFileDuration = audio.getAudioFileDuration();
     uint16_t audioCurrentTime = audio.getAudioCurrentTime();
@@ -482,7 +381,7 @@ void updateDisplay(void) {
     display.clearDisplay();
     display.setCursor(0, 0);
     display.setTextSize(1);
-    display.printf("%d de %d", fileIndex + 1, fileCounter);
+    display.printf("%d de %d", fileIndex + 1, folders[folderIndex].fileCounter);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(SCREEN_WIDTH - (11 * letterWidth), 0);
     char v[3];
@@ -496,12 +395,12 @@ void updateDisplay(void) {
     y_offset = 5;
     display.setCursor(0, displayLineTwo + y_offset);
     display.print("Pasta: ");
-    display.println(currentFolder);
+    display.println(folders[folderIndex].name);
 
     y_offset = 10;
     display.setCursor(-xPosName, displayLineThree + y_offset);
     xPosName = xPosName + pixelSpeed;
-    display.println(currentFile);
+    display.println(folders[folderIndex].files[fileIndex]);
     if(xPosName > maxXPosName) xPosName = -SCREEN_WIDTH;
 
     y_offset = 15;
@@ -608,7 +507,6 @@ uint32_t g_checkPinsTime = millis();
 bool playPinPressed = 0;
 bool forwardPinPressed = 0;
 bool backwardPinPressed = 0;
-
 void checkPins() {
   uint32_t crr_checkPinsTime = millis();
   if(crr_checkPinsTime - g_checkPinsTime > 200) {
@@ -620,13 +518,14 @@ void checkPins() {
     bool volumeDownPin = digitalRead(VOLUME_DOWN_PIN);
     
     if(forwardPin && !forwardPinPressed) {
-      Serial.println("forwardPin");
+      Serial.println("ForwardPin");
       forwardPinPressed = 1;
-      if(fileCounter > fileIndex + 1) nextSong();
-      else if(folderCounter > folderIndex) nextFolder();
+      if(folders[folderIndex].fileCounter > fileIndex + 1) nextSong();
+      else if(folderCounter - 1 > folderIndex) nextFolder();
       else rootSong();
     }
     else if (!forwardPin && forwardPinPressed) forwardPinPressed = 0;
+    else if (forwardPin && forwardPinPressed) forwardPinPressed = 0;
 
     if(playPin && !playPinPressed) {
       Serial.println("playPin");
@@ -634,6 +533,7 @@ void checkPins() {
       playResume();
     }
     else if (!playPin && playPinPressed) playPinPressed = 0;
+    else if (playPin && playPinPressed) playPinPressed = 0;
 
     if(backwardPin && !backwardPinPressed) {
       Serial.println("backwardPin");
@@ -643,6 +543,7 @@ void checkPins() {
       else lastSong();
     }
     else if (!backwardPin && backwardPinPressed) backwardPinPressed = 0;
+    else if (backwardPin && backwardPinPressed) backwardPinPressed = 0;
     
     if(volumeUpPin && volume < 21) {
       Serial.println("Volume up");
@@ -666,13 +567,13 @@ uint32_t lastAudioCurrentTime = 0;
 uint32_t g_watchTrackPlaying = millis();
 void watchTrackPlaying() {
   uint32_t crr_watchTrackPlaying = millis();
-  if(pauseResumeStatus && crr_watchTrackPlaying - g_watchTrackPlaying > 1000) {
+  if(pauseResumeStatus && crr_watchTrackPlaying - g_watchTrackPlaying > 1250) {
     g_watchTrackPlaying = millis();
     uint32_t audioCurrentTime = audio.getAudioCurrentTime();
     if(audioCurrentTime > 0) {
       if(lastAudioCurrentTime == audioCurrentTime) {
-        if(fileCounter > fileIndex + 1) nextSong();
-        else if(folderCounter > folderIndex) nextFolder();
+        if(folders[folderIndex].fileCounter > fileIndex + 1) nextSong();
+        else if(folderCounter - 1 > folderIndex) nextFolder();
         else rootSong();
       };
       lastAudioCurrentTime = audioCurrentTime;
