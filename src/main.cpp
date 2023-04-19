@@ -1,3 +1,29 @@
+/**
+ * Projeto de MP3 player com controle remoto via rádio
+ * Desenvolvido por Bruno França
+ * 
+ * Pinos usados:
+ *  Pino remote:      15; #define AMP_REM_PIN 15
+ *  Pino Play/Pause:  13; #define PLAY_PIN 13
+ *  Pino Próximo:     12; #define FORWARD_PIN 12
+ *  Pino Anterior:    14; #define BACKWARD_PIN 14
+ *  Pino Volume+:     33; #define VOLUME_UP_PIN 33
+ *  Pino Volume-:     32; #define VOLUME_DOWN_PIN 32
+ *  Pino Repeat:      04; #define REPEAT_PIN 4
+ *
+ *  Pino i2s: I2S_DOUT  25
+ *  Pino i2s: I2S_BCLK  27
+ *  Pino i2s: I2S_LRC   26
+ * 
+ *  Pino i2c SCL:   22
+ *  Pino i2c SDA:   21
+ * 
+ *  Pino SPI MOSI:  23
+ *  Pino SPI MISO:  19
+ *  Pino SPI SCK:   18
+ *  Pino SPI SS:    5
+*/
+
 #include <Arduino.h>
 #include <SD.h>
 #include <FS.h>
@@ -109,7 +135,6 @@ const unsigned char* bmp_allArray[8] = {
 #define RANDOM_ALL_SONGS 2
 #define REPEAT_SONG 3
 
-uint8_t button_event = NO_BTN_EVENT;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Audio audio;
 
@@ -127,9 +152,10 @@ uint16_t randomFileStackPos = 0;
 uint32_t randomFileStackSize = 0;
 
 char *extension = (char*)malloc(sizeof (char*) * 4); // REMOVER DO PROGRAMA
-bool pauseResumeStatus = 0;
+bool pauseResumeStatus = 0; // 1 -> Play; 0 -> Pause
 uint8_t volume = 10;
 uint8_t randomMode = RANDOM_NORMAL;
+uint8_t button_event = NO_BTN_EVENT;
 
 int setUpSSD1306Display(void);
 int setUpSdCard(void);
@@ -666,7 +692,7 @@ void watchTrackPlaying() {
     g_watchTrackPlaying = millis();
     
     uint32_t audioCurrentTime = audio.getAudioCurrentTime();
-    if(lastAudioCurrentTime == audioCurrentTime) {
+    if(audioCurrentTime > 0 && lastAudioCurrentTime == audioCurrentTime) {
       printf("Caiu na verificacao de faixa\n lastAudio: %d, currentTime: %d\n", lastAudioCurrentTime, audioCurrentTime);
       lastAudioCurrentTime = 0;
       if(folders[folderIndex].fileCounter > fileIndex + 1) nextSong();
@@ -674,7 +700,9 @@ void watchTrackPlaying() {
       else rootSong();
       return;
     }
-    else { lastAudioCurrentTime = 0; };
     lastAudioCurrentTime = audioCurrentTime;
+  }
+  else if(!pauseResumeStatus && lastAudioCurrentTime > 0) {
+    lastAudioCurrentTime = 0; printf("lastAudioCurrentTime = 0;\n");
   }
 }
