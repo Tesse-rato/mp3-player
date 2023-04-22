@@ -117,8 +117,9 @@ const unsigned char* bmp_allArray[8] = {
 #define FORWARD_PIN 12
 #define BACKWARD_PIN 14
 #define VOLUME_UP_PIN 33
-#define VOLUME_DOWN_PIN 32
+#define VOLUME_DOWN_PIN 34
 #define REPEAT_PIN 4
+#define SET_HC12 32
 
 #define NO_BTN_EVENT 0
 #define PLAY_PAUSE_SONG_EVENT 1
@@ -178,11 +179,19 @@ void previusSong(void);
 void volumeUp(void);
 void volumeDown(void);
 void changeRandomMode(void);
+void setUpRadioTransmitter(void);
 
 void setup() {
   Serial.begin(9600);
+
   pinMode(AMP_REM_PIN, OUTPUT);
   digitalWrite(AMP_REM_PIN, LOW);
+
+  // if(Serial1.available()) {
+  //   Serial.printf("Tem dados na serial\n");
+  //   Serial.printf("Dados recebidos: %s\n", Serial1.read());
+  // }
+
 
   pinMode(PLAY_PIN, INPUT_PULLDOWN);
   pinMode(FORWARD_PIN, INPUT_PULLDOWN);
@@ -193,6 +202,9 @@ void setup() {
 
   if(!setUpSSD1306Display()) return;
   if(!setUpSdCard()) return;
+  
+  setUpRadioTransmitter();
+
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
   audio.setVolume(volume); // default 0...21
   
@@ -215,7 +227,14 @@ void loop() {
   updateDisplay();
   watchTrackPlaying();
   audio.loop();
+
+  if(Serial.available()) {
+    Serial.printf("Tem dados na serial do PC\n");
+    String data = Serial.readString();
+    Serial.printf("Dados: %s\n\n", data);
+  }
 }
+
 
 void mountSdStruct() {
   File root = SD.open("/");
@@ -753,5 +772,19 @@ void watchTrackPlaying() {
       nextSong();
     }
     lastAudioCurrentTime = audioCurrentTime;
+  }
+}
+
+void setUpRadioTransmitter() {
+  pinMode(SET_HC12, OUTPUT);
+  digitalWrite(SET_HC12, HIGH);
+
+  Serial2.begin(9600);
+
+  Serial2.write("AT+B9600");
+  
+  if(Serial2.available()) {
+    String data = Serial2.readString();
+    Serial.printf("Retorno radio: %s", data);
   }
 }
