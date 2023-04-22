@@ -35,6 +35,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <Audio.h>
+// #include <BluetoothA2DPSink.h>
 
 // 'fill_heart', 8x8px - Música curtida
 const unsigned char bmp_fill_heart [] PROGMEM = {
@@ -137,11 +138,14 @@ const unsigned char* bmp_allArray[8] = {
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Audio audio;
+// BluetoothA2DPSink a2dp_sink;
 
 struct Folder {
   char* name;
   char** files;
   uint16_t fileCounter = 0;
+  uint16_t *randomFileStack;
+  uint16_t randomFileStackPos = -1;
 };
 struct Folder *folders;
 uint16_t folderCounter = 0;
@@ -149,11 +153,11 @@ int16_t folderIndex = SD_ROOT;
 uint16_t fileIndex = FILE_ROOT;
 uint16_t **randomFileStack = NULL;
 uint16_t randomFileStackPos = 0;
-uint32_t randomFileStackSize = 0;
+uint32_t randomFileStackSize = -1;
 
 char *extension = (char*)malloc(sizeof (char*) * 4); // REMOVER DO PROGRAMA
 bool pauseResumeStatus = 0; // 1 -> Play; 0 -> Pause
-uint8_t volume = 10;
+uint8_t volume = 2;
 uint8_t randomMode = RANDOM_NORMAL;
 uint8_t button_event = NO_BTN_EVENT;
 
@@ -163,36 +167,17 @@ void setFileExtension(char*);
 void updateDisplay(void);
 void formatSeconds(char *timeBuffer, uint32_t seconds);
 void checkPins(void);
-void loadSD(uint16_t _fileIndex, int32_t _folderIndex);
+void loadSD(int16_t _fileIndex, int16_t _folderIndex);
 void watchTrackPlaying(void);
-void rootSong() { button_event = ROOT_SONG_EVENT; loadSD(FILE_ROOT, SD_ROOT);}
 void playResume() { button_event = PLAY_PAUSE_SONG_EVENT; audio.pauseResume(); pauseResumeStatus = !pauseResumeStatus; }
-void lastSong() { button_event = LAST_SONG_EVENT; loadSD(FILE_ROOT, folderCounter - 1); }
 void mountSdStruct(void);
 void initRandomFileStack(void);
-void setSong(uint16_t toFile, uint16_t toFolder) {
-  if(randomMode == RANDOM_NORMAL) loadSD(toFile, toFolder);
-  if(randomMode == RANDOM_IN_FOLDER) loadSD(random(folders[folderIndex].fileCounter), folderIndex);
-  if(randomMode == REPEAT_SONG) loadSD(fileIndex, folderIndex);
-  if(randomMode == RANDOM_ALL_SONGS) {
-    printf("RANDOM_ALL_SONGS\n");
-    if(button_event == NEXT_SONG_EVENT) {
-      if(randomFileStackPos >= randomFileStackSize - 1) randomFileStackPos = 0;
-      else randomFileStackPos += 1;
-    }
-    else if(button_event == PREVIUS_SONG_EVENT) {
-      if(randomFileStackPos <= 0) randomFileStackPos = randomFileStackSize - 1;
-      else randomFileStackPos -= 1;
-    }
-    loadSD(randomFileStack[randomFileStackPos][1], randomFileStack[randomFileStackPos][0]);
-  }
-}
-
-void nextSong() { button_event = NEXT_SONG_EVENT; setSong(fileIndex + 1, folderIndex); }
-void previusSong() { button_event = PREVIUS_SONG_EVENT; setSong(fileIndex - 1, folderIndex); }
-void nextFolder() { button_event = NEXT_FOLDER_EVENT; setSong(FILE_ROOT, folderIndex + 1); }
-void previusFolder() { button_event = PREVIUS_FOLDER_EVENT; setSong(FILE_ROOT, folderIndex - 1); }
-
+void nextSong(void);
+void previusSong(void);
+void volumeUp(void);
+void volumeDown(void);
+void changeRandomMode(void);
+void setSong(uint16_t toFile, uint16_t toFolder);
 
 void setup() {
   Serial.begin(9600);
@@ -214,6 +199,15 @@ void setup() {
   mountSdStruct();
   initRandomFileStack();
   loadSD(SD_ROOT, FILE_ROOT);
+
+  // i2s_pin_config_t my_pin_config = {
+  //     .bck_io_num = 26,
+  //     .ws_io_num = 25,
+  //     .data_out_num = 22,
+  //     .data_in_num = I2S_PIN_NO_CHANGE
+  // };
+  // a2dp_sink.set_pin_config(my_pin_config);
+  // a2dp_sink.start("Bruno-BoomBox");
 }
 
 void loop() {
@@ -288,6 +282,18 @@ void mountSdStruct() {
       file = root.openNextFile();
     }
     folders[folder].fileCounter = fc;
+    folders[folder].randomFileStack = (uint16_t*)malloc(sizeof(uint16_t*) * fc);
+    for(uint16_t i = 0; i < fc; i++) {
+      folders[folder].randomFileStack[i] = i;
+    }
+    for(uint16_t i = 0; i < fc; i++) {
+      uint16_t a = random(fc);
+      uint16_t b = random(fc);
+      if(a == b) b = random(fc);
+      uint16_t tmp = folders[folder].randomFileStack[a];
+      folders[folder].randomFileStack[a] = folders[folder].randomFileStack[b];
+      folders[folder].randomFileStack[b] = tmp;
+    }
   }
 }
 
@@ -305,7 +311,7 @@ void initRandomFileStack() {
       c++;
     }
   }
-  
+
   for(uint16_t i = 0; i < c; i ++) {
     uint16_t *tmp;
     uint16_t a, b;
@@ -316,6 +322,7 @@ void initRandomFileStack() {
     randomFileStack[a] = randomFileStack[b];
     randomFileStack[b] = tmp;
   }
+
   randomFileStackSize = c;
 }
 
@@ -383,34 +390,20 @@ int setUpSdCard() {
   return 1;
 }
 
-void loadSD(uint16_t _fileIndex, int32_t _folderIndex) {
-  if(_fileIndex < FILE_ROOT) return loadSD(FILE_ROOT, _folderIndex);
-  if(_folderIndex < SD_ROOT) return loadSD(_fileIndex, SD_ROOT);
+void loadSD(int16_t _fileIndex, int16_t _folderIndex) {
+  if(
+    _folderIndex > folderCounter - 1 ||
+    _folderIndex < 0
+  ){
+    printf("Tentando acessar pasta que não existe");
+    return;
+  }
+
   digitalWrite(AMP_REM_PIN, LOW);
   folderIndex = _folderIndex;
   fileIndex = _fileIndex;
 
   struct Folder folder = folders[folderIndex];
-
-  if(!folder.fileCounter) return loadSD(fileIndex, folderIndex + 1);
-  
-  if(!folder.fileCounter && button_event == PREVIUS_FOLDER_EVENT) {
-    return loadSD(fileIndex, folderIndex - 1);
-    button_event = NO_BTN_EVENT;
-  }
-  if(!folder.fileCounter && button_event == LAST_SONG_EVENT) {
-    return loadSD(fileIndex, folderIndex - 1);
-    button_event = NO_BTN_EVENT;
-  }
-
-  if(button_event == PREVIUS_FOLDER_EVENT) {
-    button_event = NO_BTN_EVENT;
-    return loadSD(folders[folderIndex].fileCounter - 1, folderIndex);
-  }
-  if(button_event == LAST_SONG_EVENT) {
-    button_event = NO_BTN_EVENT;
-    return loadSD(folders[folderIndex].fileCounter - 1, folderIndex);
-  }
 
   char* file = folder.files[fileIndex];
   char* path = (char*)malloc(sizeof (char*) * (strlen(folder.name) + strlen(file)));
@@ -596,6 +589,132 @@ void formatSeconds(char *timeBuffer, uint32_t seconds) {
   }
 }
 
+void setSong(uint16_t toFile, uint16_t toFolder) {
+  loadSD(toFile, toFolder);
+  if(randomMode == RANDOM_NORMAL) loadSD(toFile, toFolder);
+  else if(randomMode == REPEAT_SONG) loadSD(fileIndex, folderIndex);
+  else if (randomMode == RANDOM_IN_FOLDER) {
+    folders[folderIndex].randomFileStackPos++;
+    if(folders[folderIndex].randomFileStackPos >= folders[folderIndex].fileCounter - 1) {
+      folders[folderIndex].randomFileStackPos = 0;
+    }
+    uint16_t pos = folders[folderIndex].randomFileStackPos;
+    loadSD(folders[folderIndex].randomFileStack[pos], folderIndex);
+  }
+  // if(randomMode == RANDOM_NORMAL) loadSD(toFile, toFolder);
+  // else if(randomMode == REPEAT_SONG) loadSD(fileIndex, folderIndex);
+  // if(randomMode == RANDOM_IN_FOLDER) {
+  //   struct Folder _folder = folders[folderIndex];
+  //   if(button_event == NEXT_SONG_EVENT) {
+  //     if(_folder.randomFileStackPos >= _folder.fileCounter - 1) _folder.randomFileStackPos = 0;
+  //     else _folder.randomFileStackPos += 1;
+  //   }
+  //   else if(button_event == PREVIUS_SONG_EVENT) {
+  //     if(_folder.randomFileStackPos <= 0) _folder.randomFileStackPos = _folder.fileCounter - 1;
+  //     else _folder.randomFileStackPos -= 1;
+  //   }
+  //   loadSD(_folder.randomFileStackPos, folderIndex);
+  // }
+  // if(randomMode == RANDOM_ALL_SONGS) {
+  //   if(button_event == NEXT_SONG_EVENT) {
+  //     if(randomFileStackPos >= randomFileStackSize - 1) randomFileStackPos = 0;
+  //     else randomFileStackPos += 1;
+  //   }
+  //   else if(button_event == PREVIUS_SONG_EVENT) {
+  //     if(randomFileStackPos <= 0) randomFileStackPos = randomFileStackSize - 1;
+  //     else randomFileStackPos -= 1;
+  //   }
+  //   loadSD(randomFileStack[randomFileStackPos][1], randomFileStack[randomFileStackPos][0]);
+  // }
+  // else loadSD(toFile, toFolder);
+}
+
+void nextSong() { 
+  button_event = NEXT_SONG_EVENT;
+
+  if(randomMode == RANDOM_NORMAL) {
+    if(fileIndex + 1 > folders[folderIndex].fileCounter - 1) {
+      if(!folders[folderIndex + 1].fileCounter) {
+        if(folderIndex + 2 > folderCounter - 1) setSong(FILE_ROOT, SD_ROOT);
+        else setSong(FILE_ROOT, folderIndex + 2);
+      }
+      else if(folderIndex + 1 > folderCounter - 1) setSong(FILE_ROOT, SD_ROOT);
+      else setSong(FILE_ROOT, folderIndex + 1);
+    }
+    else setSong(fileIndex + 1, folderIndex);
+  }
+  else if(randomMode == REPEAT_SONG) loadSD(fileIndex, folderIndex);
+  else if (randomMode == RANDOM_IN_FOLDER) {
+    folders[folderIndex].randomFileStackPos++;
+    if(folders[folderIndex].randomFileStackPos >= folders[folderIndex].fileCounter - 1) {
+      folders[folderIndex].randomFileStackPos = 0;
+    }
+    uint16_t pos = folders[folderIndex].randomFileStackPos;
+    loadSD(folders[folderIndex].randomFileStack[pos], folderIndex);
+  }
+  else if(randomMode == RANDOM_ALL_SONGS) {
+    if(randomFileStackPos >= randomFileStackSize - 1) randomFileStackPos = 0;
+    else randomFileStackPos += 1;
+    loadSD(randomFileStack[randomFileStackPos][1], randomFileStack[randomFileStackPos][0]);
+  }
+}
+
+void previusSong() {
+  button_event = PREVIUS_SONG_EVENT;
+
+  if(randomMode == RANDOM_NORMAL){
+    // Execução normal das faixas de músicas
+    if(fileIndex - 1 < 0) {
+      if(!folders[folderIndex - 1].fileCounter) {
+        if(folderIndex - 2 < 0) loadSD(folders[folderCounter - 1].fileCounter - 1, folderCounter - 1);
+        else loadSD(folders[folderIndex - 2].fileCounter - 1, folderIndex - 2);
+      }
+      else if(folderIndex - 1 < 0) loadSD(folders[folderCounter - 1].fileCounter - 1, folderCounter - 1);
+      else loadSD(folders[folderIndex - 1].fileCounter - 1, folderIndex - 1);
+    }
+    else loadSD(fileIndex - 1, folderIndex);  
+  }
+  else if(randomMode == REPEAT_SONG) loadSD(fileIndex, folderIndex);
+  else if (randomMode == RANDOM_IN_FOLDER) {
+    folders[folderIndex].randomFileStackPos--;
+    if(folders[folderIndex].randomFileStackPos < 0) {
+      folders[folderIndex].randomFileStackPos = folders[folderIndex].fileCounter - 1;
+    }
+    uint16_t pos = folders[folderIndex].randomFileStackPos;
+    loadSD(folders[folderIndex].randomFileStack[pos], folderIndex);
+  }
+  else if(randomMode == RANDOM_ALL_SONGS) {
+    if(randomFileStackPos <= 0) randomFileStackPos = randomFileStackSize - 1;
+    else randomFileStackPos -= 1;
+    loadSD(randomFileStack[randomFileStackPos][1], randomFileStack[randomFileStackPos][0]);
+  }
+}
+// void nextFolder() { button_event = NEXT_FOLDER_EVENT; setSong(FILE_ROOT, folderIndex + 1); }
+// void previusFolder() { button_event = PREVIUS_FOLDER_EVENT; setSong(FILE_ROOT, folderIndex - 1); }
+
+void volumeUp() {
+  button_event = VOLUME_UP_EVENT;
+  volume++;
+  audio.setVolume(volume);
+}
+
+void volumeDown() {
+  button_event = VOLUME_DOWN_EVENT;
+  volume--;
+  audio.setVolume(volume);
+}
+
+void changeRandomMode() {
+  button_event = RANDOM_EVENT;
+  switch (randomMode) {
+    case RANDOM_NORMAL: { randomMode = RANDOM_IN_FOLDER; break;}
+    case RANDOM_IN_FOLDER: { randomMode = RANDOM_ALL_SONGS; break;}
+    case RANDOM_ALL_SONGS: { randomMode = REPEAT_SONG; break;}
+    case REPEAT_SONG: { randomMode = RANDOM_NORMAL; break;}
+    default: break;
+  }
+}
+
 uint32_t g_checkPinsTime = millis();
 bool playPinPressed = 0;
 bool forwardPinPressed = 0;
@@ -615,9 +734,7 @@ void checkPins() {
     if(forwardPin && !forwardPinPressed) {
       Serial.println("ForwardPin");
       forwardPinPressed = 1;
-      if(folders[folderIndex].fileCounter > fileIndex + 1) nextSong();
-      else if(folderCounter - 1 > folderIndex) nextFolder();
-      else rootSong();
+      nextSong();
     }
     else if (!forwardPin && forwardPinPressed) forwardPinPressed = 0;
     else if (forwardPin && forwardPinPressed) return;
@@ -633,49 +750,24 @@ void checkPins() {
     if(backwardPin && !backwardPinPressed) {
       Serial.println("backwardPin");
       backwardPinPressed = 1;
-      if(fileIndex > FILE_ROOT) previusSong();
-      else if (folderIndex > SD_ROOT) previusFolder();
-      else lastSong();
+      previusSong();
     }
     else if (!backwardPin && backwardPinPressed) backwardPinPressed = 0;
     else if (backwardPin && backwardPinPressed) return;
     
     if(volumeUpPin && volume < 21) {
       Serial.println("Volume up");
-      button_event = VOLUME_UP_EVENT;
-      volume++;
-      audio.setVolume(volume);
+      volumeUp();
     }
 
     if(volumeDownPin && volume > 0) {
       Serial.println("Volume down");
-      button_event = VOLUME_DOWN_EVENT;
-      volume--;
-      audio.setVolume(volume);
+      volumeDown();
     }
 
     if(repeatPin && !repeatPinPressed) {
       Serial.printf("Repeat pin %d\n", randomMode);
-      button_event = RANDOM_EVENT;
-      switch (randomMode) {
-        case RANDOM_NORMAL: {
-          randomMode = RANDOM_IN_FOLDER;
-          break;
-        }
-        case RANDOM_IN_FOLDER: {
-          randomMode = RANDOM_ALL_SONGS;
-          break;
-        }
-        case RANDOM_ALL_SONGS: {
-          randomMode = REPEAT_SONG;
-          break;
-        }
-        case REPEAT_SONG: {
-          randomMode = RANDOM_NORMAL;
-          break;
-        }
-        default: break;
-      }
+      changeRandomMode();
     }
     else if (!repeatPin && repeatPinPressed) repeatPinPressed = 0;
     else if (repeatPin && repeatPinPressed) return;
@@ -688,21 +780,15 @@ uint32_t lastAudioCurrentTime = 0;
 uint32_t g_watchTrackPlaying = millis();
 void watchTrackPlaying() {
   uint32_t crr_watchTrackPlaying = millis();
-  if(pauseResumeStatus && crr_watchTrackPlaying - g_watchTrackPlaying > 1200) {
+  if(pauseResumeStatus && crr_watchTrackPlaying - g_watchTrackPlaying > 1100) {
     g_watchTrackPlaying = millis();
-    
     uint32_t audioCurrentTime = audio.getAudioCurrentTime();
+    if(lastAudioCurrentTime > audioCurrentTime) lastAudioCurrentTime = 0;
     if(audioCurrentTime > 0 && lastAudioCurrentTime == audioCurrentTime) {
       printf("Caiu na verificacao de faixa\n lastAudio: %d, currentTime: %d\n", lastAudioCurrentTime, audioCurrentTime);
       lastAudioCurrentTime = 0;
-      if(folders[folderIndex].fileCounter > fileIndex + 1) nextSong();
-      else if(folderCounter - 1 > folderIndex) nextFolder();
-      else rootSong();
-      return;
+      nextSong();
     }
     lastAudioCurrentTime = audioCurrentTime;
-  }
-  else if(!pauseResumeStatus && lastAudioCurrentTime > 0) {
-    lastAudioCurrentTime = 0; printf("lastAudioCurrentTime = 0;\n");
   }
 }
