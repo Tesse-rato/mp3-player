@@ -22,11 +22,13 @@
  *  Pino SPI MISO:  19
  *  Pino SPI SCK:   18
  *  Pino SPI SS:    5
+ * 
+ * Bugs e anotacoes
+ * OK - Tem um bug em modo aleatorio na pasta, ao voltar a faixa backfoard button
 */
 
 #include <Arduino.h>
 #include <SD.h>
-#include <FS.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -35,7 +37,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <Audio.h>
-// #include <BluetoothA2DPSink.h>
 
 // 'fill_heart', 8x8px - Música curtida
 const unsigned char bmp_fill_heart [] PROGMEM = {
@@ -145,7 +146,7 @@ struct Folder {
   char** files;
   uint16_t fileCounter = 0;
   uint16_t *randomFileStack;
-  uint16_t randomFileStackPos = -1;
+  int16_t randomFileStackPos = 0;
 };
 struct Folder *folders;
 uint16_t folderCounter = 0;
@@ -153,7 +154,7 @@ int16_t folderIndex = SD_ROOT;
 uint16_t fileIndex = FILE_ROOT;
 uint16_t **randomFileStack = NULL;
 uint16_t randomFileStackPos = 0;
-uint32_t randomFileStackSize = -1;
+uint32_t randomFileStackSize = 0;
 
 char *extension = (char*)malloc(sizeof (char*) * 4); // REMOVER DO PROGRAMA
 bool pauseResumeStatus = 0; // 1 -> Play; 0 -> Pause
@@ -177,7 +178,6 @@ void previusSong(void);
 void volumeUp(void);
 void volumeDown(void);
 void changeRandomMode(void);
-void setSong(uint16_t toFile, uint16_t toFolder);
 
 void setup() {
   Serial.begin(9600);
@@ -283,6 +283,7 @@ void mountSdStruct() {
     }
     folders[folder].fileCounter = fc;
     folders[folder].randomFileStack = (uint16_t*)malloc(sizeof(uint16_t*) * fc);
+    folders[folder].randomFileStackPos = 0;
     for(uint16_t i = 0; i < fc; i++) {
       folders[folder].randomFileStack[i] = i;
     }
@@ -589,64 +590,24 @@ void formatSeconds(char *timeBuffer, uint32_t seconds) {
   }
 }
 
-void setSong(uint16_t toFile, uint16_t toFolder) {
-  loadSD(toFile, toFolder);
-  if(randomMode == RANDOM_NORMAL) loadSD(toFile, toFolder);
-  else if(randomMode == REPEAT_SONG) loadSD(fileIndex, folderIndex);
-  else if (randomMode == RANDOM_IN_FOLDER) {
-    folders[folderIndex].randomFileStackPos++;
-    if(folders[folderIndex].randomFileStackPos >= folders[folderIndex].fileCounter - 1) {
-      folders[folderIndex].randomFileStackPos = 0;
-    }
-    uint16_t pos = folders[folderIndex].randomFileStackPos;
-    loadSD(folders[folderIndex].randomFileStack[pos], folderIndex);
-  }
-  // if(randomMode == RANDOM_NORMAL) loadSD(toFile, toFolder);
-  // else if(randomMode == REPEAT_SONG) loadSD(fileIndex, folderIndex);
-  // if(randomMode == RANDOM_IN_FOLDER) {
-  //   struct Folder _folder = folders[folderIndex];
-  //   if(button_event == NEXT_SONG_EVENT) {
-  //     if(_folder.randomFileStackPos >= _folder.fileCounter - 1) _folder.randomFileStackPos = 0;
-  //     else _folder.randomFileStackPos += 1;
-  //   }
-  //   else if(button_event == PREVIUS_SONG_EVENT) {
-  //     if(_folder.randomFileStackPos <= 0) _folder.randomFileStackPos = _folder.fileCounter - 1;
-  //     else _folder.randomFileStackPos -= 1;
-  //   }
-  //   loadSD(_folder.randomFileStackPos, folderIndex);
-  // }
-  // if(randomMode == RANDOM_ALL_SONGS) {
-  //   if(button_event == NEXT_SONG_EVENT) {
-  //     if(randomFileStackPos >= randomFileStackSize - 1) randomFileStackPos = 0;
-  //     else randomFileStackPos += 1;
-  //   }
-  //   else if(button_event == PREVIUS_SONG_EVENT) {
-  //     if(randomFileStackPos <= 0) randomFileStackPos = randomFileStackSize - 1;
-  //     else randomFileStackPos -= 1;
-  //   }
-  //   loadSD(randomFileStack[randomFileStackPos][1], randomFileStack[randomFileStackPos][0]);
-  // }
-  // else loadSD(toFile, toFolder);
-}
-
 void nextSong() { 
   button_event = NEXT_SONG_EVENT;
 
   if(randomMode == RANDOM_NORMAL) {
     if(fileIndex + 1 > folders[folderIndex].fileCounter - 1) {
       if(!folders[folderIndex + 1].fileCounter) {
-        if(folderIndex + 2 > folderCounter - 1) setSong(FILE_ROOT, SD_ROOT);
-        else setSong(FILE_ROOT, folderIndex + 2);
+        if(folderIndex + 2 > folderCounter - 1) loadSD(FILE_ROOT, SD_ROOT);
+        else loadSD(FILE_ROOT, folderIndex + 2);
       }
-      else if(folderIndex + 1 > folderCounter - 1) setSong(FILE_ROOT, SD_ROOT);
-      else setSong(FILE_ROOT, folderIndex + 1);
+      else if(folderIndex + 1 > folderCounter - 1) loadSD(FILE_ROOT, SD_ROOT);
+      else loadSD(FILE_ROOT, folderIndex + 1);
     }
-    else setSong(fileIndex + 1, folderIndex);
+    else loadSD(fileIndex + 1, folderIndex);
   }
   else if(randomMode == REPEAT_SONG) loadSD(fileIndex, folderIndex);
   else if (randomMode == RANDOM_IN_FOLDER) {
     folders[folderIndex].randomFileStackPos++;
-    if(folders[folderIndex].randomFileStackPos >= folders[folderIndex].fileCounter - 1) {
+    if(folders[folderIndex].randomFileStackPos > folders[folderIndex].fileCounter - 1) {
       folders[folderIndex].randomFileStackPos = 0;
     }
     uint16_t pos = folders[folderIndex].randomFileStackPos;
@@ -663,7 +624,6 @@ void previusSong() {
   button_event = PREVIUS_SONG_EVENT;
 
   if(randomMode == RANDOM_NORMAL){
-    // Execução normal das faixas de músicas
     if(fileIndex - 1 < 0) {
       if(!folders[folderIndex - 1].fileCounter) {
         if(folderIndex - 2 < 0) loadSD(folders[folderCounter - 1].fileCounter - 1, folderCounter - 1);
@@ -676,8 +636,10 @@ void previusSong() {
   }
   else if(randomMode == REPEAT_SONG) loadSD(fileIndex, folderIndex);
   else if (randomMode == RANDOM_IN_FOLDER) {
-    folders[folderIndex].randomFileStackPos--;
-    if(folders[folderIndex].randomFileStackPos < 0) {
+    if(folders[folderIndex].randomFileStackPos > 0) {
+      folders[folderIndex].randomFileStackPos--;
+    }
+    else {
       folders[folderIndex].randomFileStackPos = folders[folderIndex].fileCounter - 1;
     }
     uint16_t pos = folders[folderIndex].randomFileStackPos;
@@ -780,9 +742,10 @@ uint32_t lastAudioCurrentTime = 0;
 uint32_t g_watchTrackPlaying = millis();
 void watchTrackPlaying() {
   uint32_t crr_watchTrackPlaying = millis();
+  uint32_t audioCurrentTime = audio.getAudioCurrentTime();
+  
   if(pauseResumeStatus && crr_watchTrackPlaying - g_watchTrackPlaying > 1100) {
     g_watchTrackPlaying = millis();
-    uint32_t audioCurrentTime = audio.getAudioCurrentTime();
     if(lastAudioCurrentTime > audioCurrentTime) lastAudioCurrentTime = 0;
     if(audioCurrentTime > 0 && lastAudioCurrentTime == audioCurrentTime) {
       printf("Caiu na verificacao de faixa\n lastAudio: %d, currentTime: %d\n", lastAudioCurrentTime, audioCurrentTime);
