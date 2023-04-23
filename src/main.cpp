@@ -141,6 +141,8 @@ const unsigned char* bmp_allArray[8] = {
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Audio audio;
 
+TaskHandle_t radioTaskHandler;
+
 struct Folder {
   char* name;
   char** files;
@@ -179,6 +181,11 @@ void volumeUp(void);
 void volumeDown(void);
 void changeRandomMode(void);
 void setUpRadioTransmitter(void);
+void radioLoop(void* pvParameters);
+
+void printTestTask() {
+  Serial.printf("Testando chamada de função fora do escopo do core\n");
+}
 
 void setup() {
   Serial.begin(9600);
@@ -186,12 +193,7 @@ void setup() {
 
   pinMode(AMP_REM_PIN, OUTPUT);
   digitalWrite(AMP_REM_PIN, LOW);
-
-  pinMode(32, OUTPUT);
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(32, LOW);
-  digitalWrite(LED_BUILTIN, HIGH);
-  
+ 
   pinMode(PLAY_PIN, INPUT_PULLDOWN);
   pinMode(FORWARD_PIN, INPUT_PULLDOWN);
   pinMode(BACKWARD_PIN, INPUT_PULLDOWN);
@@ -201,8 +203,7 @@ void setup() {
 
   if(!setUpSSD1306Display()) return;
   if(!setUpSdCard()) return;
-  
-  // setUpRadioTransmitter();
+  setUpRadioTransmitter();
 
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
   audio.setVolume(volume); // default 0...21
@@ -210,24 +211,37 @@ void setup() {
   mountSdStruct();
   initRandomFileStack();
   loadSD(SD_ROOT, FILE_ROOT);
+
+  xTaskCreatePinnedToCore(
+    radioLoop,
+    "Radio-Task",
+    1000,
+    NULL,
+    0,
+    &radioTaskHandler,
+    PRO_CPU_NUM
+  );
 }
 
-void loop() {
-  if(Serial.available()) {
-    Serial.printf("Dado disponivel da Serial0\n");
-    Serial2.print(Serial.readString());
-  }
-  if(Serial2.available()) {
-    Serial.printf("Dado disponivel da Serial2\n");
-    Serial.print(Serial2.read());
-  }
-
+void loop(){
   checkPins();
   updateDisplay();
   watchTrackPlaying();
   audio.loop();
-}
+};
 
+void radioLoop(void* pvParameters) {
+  for(;;) {
+    if(Serial.available()) {
+      Serial2.print(Serial.readString());
+    }
+    if(Serial2.available()) {
+      volumeUp();
+      Serial.print(Serial2.readString());
+    }
+    vTaskDelay(200);
+  }
+}
 
 void mountSdStruct() {
   File root = SD.open("/");
@@ -769,14 +783,11 @@ void watchTrackPlaying() {
 }
 
 void setUpRadioTransmitter() {
+  pinMode(SET_HC12, OUTPUT);
+  digitalWrite(SET_HC12, LOW);
   Serial.printf("Configurando o radio transmissor\n");
-
+  Serial2.print("AT+FU2");
   Serial2.print("AT+B4800");
-  
-  while(Serial2.available()) {
-    // if(Serial2.available()) {
-      String data = Serial2.readString();
-      Serial.printf("Retorno radio: %s", data);
-    // }
-  }
+  Serial2.print("AT+C13");
+  digitalWrite(SET_HC12, HIGH);
 }
