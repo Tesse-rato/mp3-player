@@ -140,7 +140,6 @@ const unsigned char* bmp_allArray[8] = {
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Audio audio;
-// BluetoothA2DPSink a2dp_sink;
 
 struct Folder {
   char* name;
@@ -183,16 +182,16 @@ void setUpRadioTransmitter(void);
 
 void setup() {
   Serial.begin(9600);
+  Serial2.begin(9600);
 
   pinMode(AMP_REM_PIN, OUTPUT);
   digitalWrite(AMP_REM_PIN, LOW);
 
-  // if(Serial1.available()) {
-  //   Serial.printf("Tem dados na serial\n");
-  //   Serial.printf("Dados recebidos: %s\n", Serial1.read());
-  // }
-
-
+  pinMode(32, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(32, LOW);
+  digitalWrite(LED_BUILTIN, HIGH);
+  
   pinMode(PLAY_PIN, INPUT_PULLDOWN);
   pinMode(FORWARD_PIN, INPUT_PULLDOWN);
   pinMode(BACKWARD_PIN, INPUT_PULLDOWN);
@@ -203,7 +202,7 @@ void setup() {
   if(!setUpSSD1306Display()) return;
   if(!setUpSdCard()) return;
   
-  setUpRadioTransmitter();
+  // setUpRadioTransmitter();
 
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
   audio.setVolume(volume); // default 0...21
@@ -211,28 +210,22 @@ void setup() {
   mountSdStruct();
   initRandomFileStack();
   loadSD(SD_ROOT, FILE_ROOT);
-
-  // i2s_pin_config_t my_pin_config = {
-  //     .bck_io_num = 26,
-  //     .ws_io_num = 25,
-  //     .data_out_num = 22,
-  //     .data_in_num = I2S_PIN_NO_CHANGE
-  // };
-  // a2dp_sink.set_pin_config(my_pin_config);
-  // a2dp_sink.start("Bruno-BoomBox");
 }
 
 void loop() {
+  if(Serial.available()) {
+    Serial.printf("Dado disponivel da Serial0\n");
+    Serial2.print(Serial.readString());
+  }
+  if(Serial2.available()) {
+    Serial.printf("Dado disponivel da Serial2\n");
+    Serial.print(Serial2.read());
+  }
+
   checkPins();
   updateDisplay();
   watchTrackPlaying();
   audio.loop();
-
-  if(Serial.available()) {
-    Serial.printf("Tem dados na serial do PC\n");
-    String data = Serial.readString();
-    Serial.printf("Dados: %s\n\n", data);
-  }
 }
 
 
@@ -776,15 +769,14 @@ void watchTrackPlaying() {
 }
 
 void setUpRadioTransmitter() {
-  pinMode(SET_HC12, OUTPUT);
-  digitalWrite(SET_HC12, HIGH);
+  Serial.printf("Configurando o radio transmissor\n");
 
-  Serial2.begin(9600);
-
-  Serial2.write("AT+B9600");
+  Serial2.print("AT+B4800");
   
-  if(Serial2.available()) {
-    String data = Serial2.readString();
-    Serial.printf("Retorno radio: %s", data);
+  while(Serial2.available()) {
+    // if(Serial2.available()) {
+      String data = Serial2.readString();
+      Serial.printf("Retorno radio: %s", data);
+    // }
   }
 }
