@@ -111,15 +111,15 @@ const unsigned char* bmp_allArray[8] = {
 #define displayLineSeven 48
 #define displayLineEight 56
 
-#define AMP_REM_PIN 15
+#define AMP_REM_PIN 33
 
 #define PLAY_PIN 13
 #define FORWARD_PIN 12
 #define BACKWARD_PIN 14
-#define VOLUME_UP_PIN 33
+#define VOLUME_UP_PIN 39
 #define VOLUME_DOWN_PIN 34
 #define REPEAT_PIN 4
-#define SET_HC12 32
+#define HC12_SET_PIN 32
 
 #define NO_BTN_EVENT 0
 #define PLAY_PAUSE_SONG_EVENT 1
@@ -140,7 +140,7 @@ const unsigned char* bmp_allArray[8] = {
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Audio audio;
-
+HardwareSerial HC12 = Serial2;
 TaskHandle_t radioTaskHandler;
 
 struct Folder {
@@ -160,7 +160,7 @@ uint32_t randomFileStackSize = 0;
 
 char *extension = (char*)malloc(sizeof (char*) * 4); // REMOVER DO PROGRAMA
 bool pauseResumeStatus = 0; // 1 -> Play; 0 -> Pause
-uint8_t volume = 2;
+uint8_t volume = 10;
 uint8_t randomMode = RANDOM_NORMAL;
 uint8_t button_event = NO_BTN_EVENT;
 
@@ -182,17 +182,21 @@ void volumeDown(void);
 void changeRandomMode(void);
 void setUpRadioTransmitter(void);
 void radioLoop(void* pvParameters);
+void runRadioCommands(String command);
 
-void printTestTask() {
-  Serial.printf("Testando chamada de função fora do escopo do core\n");
-}
 
 void setup() {
   Serial.begin(9600);
-  Serial2.begin(9600);
+  HC12.begin(9600);
 
+  pinMode(HC12_SET_PIN, OUTPUT);
   pinMode(AMP_REM_PIN, OUTPUT);
+  
   digitalWrite(AMP_REM_PIN, LOW);
+  digitalWrite(HC12_SET_PIN, LOW);
+  delay(80);
+  digitalWrite(AMP_REM_PIN, HIGH);
+  // setUpRadioTransmitter();
  
   pinMode(PLAY_PIN, INPUT_PULLDOWN);
   pinMode(FORWARD_PIN, INPUT_PULLDOWN);
@@ -203,7 +207,6 @@ void setup() {
 
   if(!setUpSSD1306Display()) return;
   if(!setUpSdCard()) return;
-  setUpRadioTransmitter();
 
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
   audio.setVolume(volume); // default 0...21
@@ -223,23 +226,50 @@ void setup() {
   );
 }
 
+bool nextSongEvent = false;
+
 void loop(){
   checkPins();
   updateDisplay();
   watchTrackPlaying();
   audio.loop();
+  if(nextSongEvent) {
+    nextSong();
+    nextSongEvent = false;
+  }
 };
+
 
 void radioLoop(void* pvParameters) {
   for(;;) {
     if(Serial.available()) {
-      Serial2.print(Serial.readString());
+      Serial.printf("Serial-PC");
+      HC12.print(Serial.readString());
     }
-    if(Serial2.available()) {
-      volumeUp();
-      Serial.print(Serial2.readString());
+    if(HC12.available()) {
+      String conteudo = "";
+      char caractere;
+      while(HC12.available() > 0) {
+        caractere = HC12.read();
+        if (caractere != '\n' && caractere != '\r'){
+          conteudo.concat(caractere);
+        }
+        delay(10);
+      }
+
+      // Serial.printf("\nRecebi: ");
+      // Serial.println(conteudo);
+      // Serial.printf("Comparação %d\n", strcmp("OK+DEFAULT", conteudo.c_str()));
+
+      if(!strcmp("NEXT_SONG", conteudo.c_str())) {
+        Serial.printf("NEXT_SONG EVENT\nConteudo: %s", conteudo);
+        nextSongEvent = true;
+      }
+      if(!strcmp("OK+DEFAULT", conteudo.c_str())) {
+        Serial.printf("Toma no cu\n");
+      }
     }
-    vTaskDelay(200);
+    vTaskDelay(500);
   }
 }
 
@@ -782,12 +812,36 @@ void watchTrackPlaying() {
   }
 }
 
+void runRadioCommands(String command) {
+  digitalWrite(HC12_SET_PIN, LOW);
+  if(HC12.available()) {
+    printf("Lixo da serial: %s\n", HC12.readString());
+  }
+  HC12.print(command);
+  while(!HC12.available());
+  if(HC12.available()) {
+    printf("Data da serial: %s\n", HC12.readString());
+  }
+  // HC12.flush();
+  // digitalWrite(HC12_SET_PIN, HIGH);AT+DEFAULT AT+RX
+}
+
 void setUpRadioTransmitter() {
-  pinMode(SET_HC12, OUTPUT);
-  digitalWrite(SET_HC12, LOW);
-  Serial.printf("Configurando o radio transmissor\n");
-  Serial2.print("AT+FU2");
-  Serial2.print("AT+B4800");
-  Serial2.print("AT+C13");
-  digitalWrite(SET_HC12, HIGH);
+  // runRadioCommands("AT+DEFAULT");NEXT_SONG
+  // runRadioCommands("AT+B4800");
+  // runRadioCommands("AT+C013");
+  // runRadioCommands("AT+FU2");
+  // runRadioCommands("AT+RX");
+
+  // HC12.readString();
+
+  // HC12.print("AT");
+
+  // while(!HC12.available());
+
+  // printf("Count: %d\n", HC12.available());
+  // printf("Read: %d\n", HC12.read());
+  // printf("Count: %d\n", HC12.available());
+
+  
 }
