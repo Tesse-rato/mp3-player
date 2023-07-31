@@ -125,13 +125,14 @@ const unsigned char* bmp_allArray[8] = {
 #define PLAY_PAUSE_SONG_EVENT 1
 #define NEXT_SONG_EVENT 2
 #define PREVIUS_SONG_EVENT 3
-#define ROOT_SONG_EVENT 4
-#define LAST_SONG_EVENT 5
-#define NEXT_FOLDER_EVENT 6
-#define PREVIUS_FOLDER_EVENT 7
+// #define ROOT_SONG_EVENT 4
+// #define LAST_SONG_EVENT 5
+// #define NEXT_FOLDER_EVENT 6
+// #define PREVIUS_FOLDER_EVENT 7
 #define VOLUME_UP_EVENT 8
 #define VOLUME_DOWN_EVENT 9
 #define RANDOM_EVENT 10
+#define MAIN_MENU_EVENT 11
 
 #define RANDOM_NORMAL 0
 #define RANDOM_IN_FOLDER 1
@@ -142,6 +143,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Audio audio;
 HardwareSerial HC12 = Serial2;
 TaskHandle_t radioTaskHandler;
+uint8_t RadioButtonEvent = NO_BTN_EVENT;
 
 struct Folder {
   char* name;
@@ -160,7 +162,7 @@ uint32_t randomFileStackSize = 0;
 
 char *extension = (char*)malloc(sizeof (char*) * 4); // REMOVER DO PROGRAMA
 bool pauseResumeStatus = 0; // 1 -> Play; 0 -> Pause
-uint8_t volume = 10;
+uint8_t volume = 2;
 uint8_t randomMode = RANDOM_NORMAL;
 uint8_t button_event = NO_BTN_EVENT;
 
@@ -169,7 +171,8 @@ int setUpSdCard(void);
 void setFileExtension(char*);
 void updateDisplay(void);
 void formatSeconds(char *timeBuffer, uint32_t seconds);
-void checkPins(void);
+void checkHardwarePins(void);
+void checkRadioPins(void);
 void loadSD(int16_t _fileIndex, int16_t _folderIndex);
 void watchTrackPlaying(void);
 void playResume() { button_event = PLAY_PAUSE_SONG_EVENT; audio.pauseResume(); pauseResumeStatus = !pauseResumeStatus; }
@@ -226,19 +229,13 @@ void setup() {
   );
 }
 
-bool nextSongEvent = false;
-
 void loop(){
-  checkPins();
+  checkHardwarePins();
+  checkRadioPins();
   updateDisplay();
   watchTrackPlaying();
   audio.loop();
-  if(nextSongEvent) {
-    nextSong();
-    nextSongEvent = false;
-  }
 };
-
 
 void radioLoop(void* pvParameters) {
   for(;;) {
@@ -247,8 +244,11 @@ void radioLoop(void* pvParameters) {
       HC12.print(Serial.readString());
     }
     if(HC12.available()) {
+      // Serial.printf("TAM: %d -> ", HC12.available());
+      
       String conteudo = "";
       char caractere;
+
       while(HC12.available() > 0) {
         caractere = HC12.read();
         if (caractere != '\n' && caractere != '\r'){
@@ -257,19 +257,39 @@ void radioLoop(void* pvParameters) {
         delay(10);
       }
 
-      // Serial.printf("\nRecebi: ");
-      // Serial.println(conteudo);
-      // Serial.printf("Comparação %d\n", strcmp("OK+DEFAULT", conteudo.c_str()));
+      // Serial.printf("Recebido no radio: %s\n", conteudo.c_str());
 
       if(!strcmp("NEXT_SONG", conteudo.c_str())) {
-        Serial.printf("NEXT_SONG EVENT\nConteudo: %s", conteudo);
-        nextSongEvent = true;
+        // Serial.printf("\tNEXT_SONG_BUTTON()\n");
+        RadioButtonEvent = NEXT_SONG_EVENT;
       }
-      if(!strcmp("OK+DEFAULT", conteudo.c_str())) {
-        Serial.printf("Toma no cu\n");
+      if(!strcmp("PREVIUS_SONG", conteudo.c_str())) {
+        // Serial.printf("\tPREVIUS_SONG_BUT()\n");
+        RadioButtonEvent = PREVIUS_SONG_EVENT;
       }
+      if(!strcmp("VOL_U`", conteudo.c_str())) {
+        // Serial.printf("\tVOLUME_UP_BUTTON()\n");
+        RadioButtonEvent = VOLUME_UP_EVENT;
+      }
+      if(!strcmp("VOL_D", conteudo.c_str())) {
+        // Serial.printf("\tVOLUME_DOWN_BUTT()\n");
+        RadioButtonEvent = VOLUME_DOWN_EVENT;
+      }
+      if(!strcmp("RANDOM_MODE", conteudo.c_str())) {
+        // Serial.printf("\tRANDOM_MODE_BUTT()\n");
+        RadioButtonEvent = RANDOM_EVENT;
+      }
+      if(!strcmp("PLAY_PAUSE", conteudo.c_str())) {
+        // Serial.printf("\tPLAY_PAUSE_BUTTO()\n");
+        RadioButtonEvent = PLAY_PAUSE_SONG_EVENT;
+      }
+      if(!strcmp("MAIN_MENU", conteudo.c_str())) {
+        // Serial.printf("\tMAIN_MENU_BUTTON()\n");
+        RadioButtonEvent = MAIN_MENU_EVENT;
+      }
+      HC12.flush();
     }
-    vTaskDelay(500);
+    vTaskDelay(80);
   }
 }
 
@@ -707,8 +727,6 @@ void previusSong() {
     loadSD(randomFileStack[randomFileStackPos][1], randomFileStack[randomFileStackPos][0]);
   }
 }
-// void nextFolder() { button_event = NEXT_FOLDER_EVENT; setSong(FILE_ROOT, folderIndex + 1); }
-// void previusFolder() { button_event = PREVIUS_FOLDER_EVENT; setSong(FILE_ROOT, folderIndex - 1); }
 
 void volumeUp() {
   button_event = VOLUME_UP_EVENT;
@@ -738,7 +756,7 @@ bool playPinPressed = 0;
 bool forwardPinPressed = 0;
 bool backwardPinPressed = 0;
 bool repeatPinPressed = 0;
-void checkPins() {
+void checkHardwarePins() {
   uint32_t crr_checkPinsTime = millis();
   if(crr_checkPinsTime - g_checkPinsTime > 200) {
     g_checkPinsTime = crr_checkPinsTime;
@@ -792,6 +810,20 @@ void checkPins() {
     
     button_event = NO_BTN_EVENT;
   }
+}
+
+void checkRadioPins() {
+  switch (RadioButtonEvent)
+  {
+    case NEXT_SONG_EVENT: { nextSong(); break; }
+    case PREVIUS_SONG_EVENT: { previusSong(); break; }
+    case VOLUME_UP_EVENT: { volumeUp(); break; }
+    case VOLUME_DOWN_EVENT: { volumeDown(); break; }
+    case RANDOM_EVENT: { changeRandomMode(); break; }
+    case PLAY_PAUSE_SONG_EVENT: { playResume(); break; }
+    case MAIN_MENU_EVENT: { Serial.printf("MAIN_MENU: Não implementado\n"); break; }
+  }
+  RadioButtonEvent = NO_BTN_EVENT;
 }
 
 uint32_t lastAudioCurrentTime = 0;
